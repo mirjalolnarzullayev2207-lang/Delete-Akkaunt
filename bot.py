@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, CommandStart
@@ -174,6 +175,28 @@ def build_router(
     return router
 
 
+async def start_health_server():
+    """Render 'Web Service' uchun kichik HTTP server (faqat PORT berilganda).
+
+    Background Worker'da PORT yo'q, shuning uchun bu ishlamaydi va kerak ham emas.
+    """
+    port = int(os.getenv("PORT", "0") or 0)
+    if not port:
+        return None
+    from aiohttp import web
+
+    async def ok(_request):
+        return web.Response(text="ok")
+
+    app = web.Application()
+    app.router.add_get("/", ok)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    await web.TCPSite(runner, "0.0.0.0", port).start()
+    log.info("Health server %s portda ishlayapti", port)
+    return runner
+
+
 async def main() -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
@@ -202,10 +225,14 @@ async def main() -> None:
     dp = Dispatcher()
     dp.include_router(build_router(settings, service, storage, bot))
 
+    health = await start_health_server()
+
     log.info("Bot ishga tushdi")
     try:
         await dp.start_polling(bot)
     finally:
+        if health:
+            await health.cleanup()
         await client.disconnect()
         await bot.session.close()
 
