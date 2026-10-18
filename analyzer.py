@@ -14,7 +14,49 @@ class Verdict:
     deleted: bool = False
 
 
-def evaluate(user: User, now: datetime, inactive_days: int) -> Verdict:
+def _join_date(user: User) -> datetime | None:
+    """Obunachi kanalga qo'shilgan vaqt (Telethon user.participant.date)."""
+    participant = getattr(user, "participant", None)
+    date = getattr(participant, "date", None)
+    if date is None:
+        return None
+    if date.tzinfo is None:
+        date = date.replace(tzinfo=timezone.utc)
+    return date
+
+
+def find_burst_ids(users, min_count: int, window_min: int = 10) -> set[int]:
+    """Qisqa vaqt ichida ommaviy qo'shilgan akkauntlar (nakrutka belgisi).
+
+    `window_min` daqiqalik oynada kamida `min_count` kishi qo'shilgan bo'lsa,
+    shu oynadagi hamma burst hisoblanadi. min_count <= 0 bo'lsa o'chiriladi.
+    """
+    if min_count <= 0:
+        return set()
+    size = window_min * 60
+    buckets: dict[tuple[int, int], list[int]] = {}
+    for u in users:
+        d = _join_date(u)
+        if d is None:
+            continue
+        ts = int(d.timestamp())
+        # ikkita siljitilgan oyna: oyna chegarasida bo'linib ketmasligi uchun
+        for shift, offset in ((0, 0), (1, size // 2)):
+            buckets.setdefault((shift, (ts + offset) // size), []).append(u.id)
+    burst: set[int] = set()
+    for ids in buckets.values():
+        if len(ids) >= min_count:
+            burst.update(ids)
+    return burst
+
+
+def evaluate(
+    user: User,
+    now: datetime,
+    inactive_days: int,
+    burst: bool = False,
+    no_photo_kick: bool = False,
+) -> Verdict:
     """Ball qancha baland bo'lsa, akkaunt shuncha shubhali.
 
     - Deleted Account         -> darhol 100 ball
@@ -22,6 +64,7 @@ def evaluate(user: User, now: datetime, inactive_days: int) -> Verdict:
     - Username yo'q           -> +1
     - Telegram scam/fake      -> +3
     - Uzoq vaqt kirmagan      -> +2
+    - Birdan ommaviy qo'shilgan (burst) -> +2
     """
     if user.deleted:
         return Verdict(score=100, reasons=["deleted"], deleted=True)
@@ -31,6 +74,10 @@ def evaluate(user: User, now: datetime, inactive_days: int) -> Verdict:
     if user.photo is None:
         verdict.score += 1
         verdict.reasons.append("avatar_yoq")
+        if no_photo_kick:
+            # KICK_NO_PHOTO yoqilgan: avatarsiz akkaunt o'z-o'zidan nomzod
+            verdict.score += 50
+            verdict.reasons.append("avatarsiz_majburiy")
 
     if not user.username:
         verdict.score += 1
@@ -52,5 +99,9 @@ def evaluate(user: User, now: datetime, inactive_days: int) -> Verdict:
         if now - was_online > timedelta(days=inactive_days):
             verdict.score += 2
             verdict.reasons.append(f"{inactive_days}_kundan_ortiq_kirmagan")
+
+    if burst:
+        verdict.score += 2
+        verdict.reasons.append("birdan_ommaviy_qoshilgan")
 
     return verdict
