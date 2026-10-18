@@ -10,7 +10,7 @@ from typing import Awaitable, Callable
 from telethon import TelegramClient, errors
 from telethon.tl.types import ChannelParticipantsAdmins, InputPeerUser
 
-from analyzer import evaluate
+from analyzer import evaluate, find_burst_ids
 from config import Settings
 from storage import Storage
 
@@ -40,6 +40,16 @@ class CleanerService:
             channel = await self.client.get_entity(self.s.channel)
             me = await self.client.get_me()
 
+            title = getattr(channel, "title", None) or str(self.s.channel)
+            try:
+                total = (await self.client.get_participants(channel, limit=0)).total
+            except Exception:
+                total = None
+            await notify(
+                f"📡 Kanal: {title}\n"
+                f"Telegram bergan umumiy obunachilar soni: {total if total is not None else 'noma`lum'}"
+            )
+
             protected = {me.id}
             async for admin in self.client.iter_participants(
                 channel, filter=ChannelParticipantsAdmins
@@ -49,9 +59,11 @@ class CleanerService:
             already_removed = self.storage.removed_ids()
             now = datetime.now(timezone.utc)
             seen: set[int] = set()
+            users = []
             rows: list[tuple[int, str, int, str, int]] = []
             deleted_count = 0
 
+            # 1-bosqich: obunachilarni yig'amiz
             async for user in self.client.iter_participants(
                 channel, aggressive=True
             ):
@@ -64,8 +76,27 @@ class CleanerService:
 
                 if user.id in protected or user.id in already_removed or user.bot:
                     continue
+                users.append(user)
 
-                verdict = evaluate(user, now, self.s.inactive_days)
+                if len(seen) % 2000 == 0:
+                    await notify(f"⏳ {len(seen)} ta obunachi yuklandi...")
+
+            # 2-bosqich: qisqa vaqtda ommaviy qo'shilganlarni topamiz
+            burst_ids = find_burst_ids(users, self.s.burst_min)
+            if burst_ids:
+                await notify(
+                    f"🕒 Qisqa vaqt ichida ommaviy qo'shilgan akkauntlar: {len(burst_ids)} ta"
+                )
+
+            # 3-bosqich: har birini baholaymiz
+            for user in users:
+                verdict = evaluate(
+                    user,
+                    now,
+                    self.s.inactive_days,
+                    burst=user.id in burst_ids,
+                    no_photo_kick=self.s.kick_no_photo,
+                )
                 if verdict.score >= self.s.threshold:
                     rows.append(
                         (
@@ -78,9 +109,6 @@ class CleanerService:
                     )
                     deleted_count += verdict.deleted
 
-                if len(seen) % 2000 == 0:
-                    await notify(f"⏳ {len(seen)} ta obunachi tekshirildi...")
-
             self.storage.replace_candidates(rows)
             self.last_scan = {
                 "total": len(seen),
@@ -88,6 +116,13 @@ class CleanerService:
                 "deleted": deleted_count,
                 "at": now.strftime("%Y-%m-%d %H:%M UTC"),
             }
+            if total and len(seen) < total * 0.5:
+                await notify(
+                    "⚠️ Ro'yxat to'liq emas: kanalda "
+                    f"{total} ta obunachi bor, lekin faqat {len(seen)} tasi ko'rindi.\n"
+                    "Tekshiring: (1) CHANNEL to'g'ri kanalni ko'rsatyaptimi, "
+                    "(2) akkaunt shu kanalda to'liq huquqli admin (yoki egasi)mi."
+                )
             await notify(
                 "✅ Skanerlash tugadi\n"
                 f"Ko'rilgan obunachilar: {len(seen)}\n"
