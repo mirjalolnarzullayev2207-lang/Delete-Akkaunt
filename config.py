@@ -33,6 +33,8 @@ class Settings:
     session_string: str
     threshold: int
     inactive_days: int
+    burst_min: int
+    kick_no_photo: bool
     daily_limit: int
     batch_size: int
     batch_pause: int
@@ -62,6 +64,9 @@ def load_settings() -> Settings:
         session_string=os.getenv("SESSION_STRING", "").strip(),
         threshold=_int("THRESHOLD", 3),
         inactive_days=_int("INACTIVE_DAYS", 90),
+        burst_min=_int("BURST_MIN", 15),
+        kick_no_photo=os.getenv("KICK_NO_PHOTO", "").strip().lower()
+        in ("1", "true", "yes", "ha"),
         daily_limit=_int("DAILY_LIMIT", 250),
         batch_size=_int("BATCH_SIZE", 30),
         batch_pause=_int("BATCH_PAUSE", 90),
