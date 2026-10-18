@@ -22,6 +22,10 @@ def _int(name: str, default: int) -> int:
     return int(raw) if raw else default
 
 
+def _bool(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "ha")
+
+
 @dataclass(frozen=True)
 class Settings:
     api_id: int
@@ -35,6 +39,9 @@ class Settings:
     inactive_days: int
     burst_min: int
     kick_no_photo: bool
+    kick_burst: bool
+    kick_inactive: bool
+    kick_lastweek: bool
     daily_limit: int
     batch_size: int
     batch_pause: int
@@ -65,8 +72,10 @@ def load_settings() -> Settings:
         threshold=_int("THRESHOLD", 3),
         inactive_days=_int("INACTIVE_DAYS", 90),
         burst_min=_int("BURST_MIN", 15),
-        kick_no_photo=os.getenv("KICK_NO_PHOTO", "").strip().lower()
-        in ("1", "true", "yes", "ha"),
+        kick_no_photo=_bool("KICK_NO_PHOTO"),
+        kick_burst=_bool("KICK_BURST"),
+        kick_inactive=_bool("KICK_INACTIVE"),
+        kick_lastweek=_bool("KICK_LASTWEEK"),
         daily_limit=_int("DAILY_LIMIT", 250),
         batch_size=_int("BATCH_SIZE", 30),
         batch_pause=_int("BATCH_PAUSE", 90),
