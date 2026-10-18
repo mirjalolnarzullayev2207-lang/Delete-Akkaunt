@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+from collections import Counter
 from datetime import datetime, timezone
 from typing import Awaitable, Callable
 
@@ -95,7 +96,10 @@ class CleanerService:
                     now,
                     self.s.inactive_days,
                     burst=user.id in burst_ids,
+                    burst_kick=self.s.kick_burst,
                     no_photo_kick=self.s.kick_no_photo,
+                    inactive_kick=self.s.kick_inactive,
+                    include_lastweek=self.s.kick_lastweek,
                 )
                 if verdict.score >= self.s.threshold:
                     rows.append(
@@ -109,6 +113,8 @@ class CleanerService:
                     )
                     deleted_count += verdict.deleted
 
+            counts = Counter(r for row in rows for r in row[3].split(";") if r)
+            breakdown = "\n".join(f"  • {k}: {v}" for k, v in counts.most_common())
             self.storage.replace_candidates(rows)
             self.last_scan = {
                 "total": len(seen),
@@ -126,7 +132,8 @@ class CleanerService:
             await notify(
                 "✅ Skanerlash tugadi\n"
                 f"Ko'rilgan obunachilar: {len(seen)}\n"
-                f"Nomzodlar: {len(rows)} (Deleted Account: {deleted_count})\n\n"
+                f"Nomzodlar: {len(rows)} (Deleted Account: {deleted_count})\n"
+                f"Sabablar bo'yicha:\n{breakdown or '  (yo`q)'}\n\n"
                 "Telegram katta kanallarda ro'yxatni ~10 000 tagacha cheklaydi. "
                 "Tozalagach yana skanerlang."
             )
